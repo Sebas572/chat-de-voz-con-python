@@ -28,7 +28,7 @@ def voice(sid, data):
 	# print(f"Received 'voice' event from {sid}. Data type: {type(data)}")
 	code = user_to_room[sid]
 	
-	sio.emit('voice', data, room=code)
+	sio.emit('voice', data, room=code, skip_sid=sid)
 
 @sio.event
 def chat_message(sid, msg):
@@ -52,7 +52,7 @@ def new_user(sid, user):
 		sio.emit('new_user', name, room=code)
 
 if __name__ == "__main__":
-    print("Socket.IO server listening on http://localhost:3500 (sin logs de acceso)...")
+    print("Socket.IO server listening on http://localhost:3500...")
     
     # Crear un logger silencioso
     class QuietLogger:
