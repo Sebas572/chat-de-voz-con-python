@@ -9,7 +9,7 @@ import platform
 from utils.thread_utils import set_high_priority, create_high_priority_thread, create_high_priority_process
 
 # Función de nivel superior para el proceso hijo
-def run_client_process(url, send_queue, receive_queue):
+def run_client_process(url, send_queue, receive_queue, chat_send_queue, chat_receive_queue):
     """Función ejecutada en el proceso hijo con alta prioridad"""
     # Configurar alta prioridad para el proceso hijo
     set_high_priority()
@@ -30,11 +30,15 @@ def run_client_process(url, send_queue, receive_queue):
         if isinstance(data, list):
             receive_queue.put(data)
 
+    def on_chat_message(msg):
+        chat_receive_queue.put(msg)
+
     # Asignamos los callbacks
     sio.on('connect', on_connect)
     sio.on('disconnect', on_disconnect)
     sio.on('connect_error', on_connect_error)
     sio.on('voice', on_voice_data)
+    sio.on('chat_message', on_chat_message)
     
     # Evento para controlar el hilo de envío
     stop_event = threading.Event()
@@ -59,9 +63,24 @@ def run_client_process(url, send_queue, receive_queue):
             except Exception as e:
                 print(f"Error en sender_thread: {e}")
     
+    def chat_sender_thread():
+        """Hilo que envía mensajes de chat desde la cola con alta prioridad"""
+        set_high_priority()
+        while not stop_event.is_set():
+            try:
+                msg = chat_send_queue.get(timeout=0.05) # 50ms timeout para mensajes de chat
+                if sio.connected:
+                    sio.emit('chat_message', msg)
+            except Empty:
+                pass
+            except Exception as e:
+                print(f"Error en chat_sender_thread: {e}")
+    
     # Iniciar hilo de envío
     sender = threading.Thread(target=sender_thread, daemon=False)
+    chat_sender = threading.Thread(target=chat_sender_thread, daemon=False)
     sender.start()
+    chat_sender.start()
     
     # Bucle de conexión/reconexión
     while not stop_event.is_set():
@@ -75,30 +94,35 @@ def run_client_process(url, send_queue, receive_queue):
     # Limpiar al terminar
     stop_event.set()
     sender.join(timeout=1.0)
+    chat_sender.join(timeout=1.0)
     if sio.connected:
         sio.disconnect()
 
 class Client():
-    def __init__(self, url='http://localhost:3000', callback_play_sound=None):
+    def __init__(self, url='http://localhost:3000', callback_play_sound=None, callback_chat_message=None):
         self.url = url
         self.callback_play_sound = callback_play_sound
+        self.callback_chat_message = callback_chat_message
         self.connected = False
         self._process = None
         # Cola para enviar datos al proceso hijo
         self.send_queue = multiprocessing.Queue(maxsize=1000)  # Limitar tamaño para evitar memoria excesiva
         # Cola para recibir datos del proceso hijo
         self.receive_queue = multiprocessing.Queue(maxsize=1000)
+        self.chat_send_queue = multiprocessing.Queue(maxsize=100)
+        self.chat_receive_queue = multiprocessing.Queue(maxsize=100)
         # Evento para detener el hilo de recepción
         self.stop_event = threading.Event()
         # Hilo para recibir datos
         self.receive_thread = None
+        self.chat_receive_thread = None
                 
     def run_socketio_client(self):
         """Inicia el cliente Socket.IO en un proceso separado con alta prioridad"""
         if self._process is None or not self._process.is_alive():
             self._process = multiprocessing.Process(
                 target=run_client_process,
-                args=(self.url, self.send_queue, self.receive_queue),
+                args=(self.url, self.send_queue, self.receive_queue, self.chat_send_queue, self.chat_receive_queue),
                 daemon=False  # Evitar que se termine al minimizar
             )
             self._process.start()
@@ -107,6 +131,8 @@ class Client():
             self.stop_event.clear()
             self.receive_thread = create_high_priority_thread(target=self._receive_loop)
             self.receive_thread.start()
+            self.chat_receive_thread = create_high_priority_thread(target=self._chat_receive_loop)
+            self.chat_receive_thread.start()
 
     def _receive_loop(self):
         """Bucle para recibir datos en el proceso principal con alta prioridad"""
@@ -125,11 +151,26 @@ class Client():
             except Exception as e:
                 print(f"Error en receive_loop: {e}")
 
+    def _chat_receive_loop(self):
+        """Bucle para recibir mensajes de chat en el proceso principal con alta prioridad"""
+        set_high_priority()
+        while not self.stop_event.is_set():
+            try:
+                msg = self.chat_receive_queue.get(timeout=0.05) # 50ms timeout para mensajes de chat
+                if self.callback_chat_message:
+                    self.callback_chat_message(msg)
+            except Empty:
+                pass
+            except Exception as e:
+                print(f"Error en chat_receive_loop: {e}")
+
     def stop(self):
         """Detiene el cliente y los hilos asociados"""
         self.stop_event.set()
         if self.receive_thread and self.receive_thread.is_alive():
             self.receive_thread.join(timeout=1.0)
+        if self.chat_receive_thread and self.chat_receive_thread.is_alive():
+            self.chat_receive_thread.join(timeout=1.0)
         if self._process and self._process.is_alive():
             self._process.terminate()
             self._process.join()
@@ -148,3 +189,15 @@ class Client():
             self.send_queue.put({'data': data}, block=False)
         except Exception as e:
             print(f"Error en send_package: {e}")
+
+    def send_chat_message(self, msg):
+        """Envía mensajes de chat al proceso de Socket.IO mediante la cola"""
+        try:
+            if self.chat_send_queue.full():
+                try:
+                    self.chat_send_queue.get_nowait()
+                except Empty:
+                    pass
+            self.chat_send_queue.put(msg, block=False)
+        except Exception as e:
+            print(f"Error en send_chat_message: {e}")

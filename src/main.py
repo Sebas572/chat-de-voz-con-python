@@ -1,6 +1,6 @@
 import sys
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QThread, Qt
+from PySide6.QtWidgets import QApplication, QLabel, QSizePolicy, QVBoxLayout, QScrollArea, QWidget
+from PySide6.QtCore import QThread, Qt, Signal
 import sounddevice as sd
 from audio.audio import MicrophoneListener
 from window.window import CreateWindow
@@ -13,26 +13,42 @@ from utils.thread_utils import create_high_priority_thread, set_high_priority
 UI_FILE = "./src/ui/main.ui"
 
 class MyMainWindow(CreateWindow):
+    chat_message_signal = Signal(str)
+
     def __init__(self):
         super().__init__(UI_FILE)
         self.listener_thread = None
         self.microphone_listener = None
         self.setup_ui()
         self.listar_dispositivos()
-        self.client = Client("http://127.0.0.1:3500", self.process_audio_data)
+        self.client = Client("http://127.0.0.1:3500", self.process_audio_data, self.receive_chat_message)
+
+        # --- Chat scrollable area setup ---
+        if self.ui_widget is None:
+            raise RuntimeError("ui_widget no fue cargado correctamente")
+        self.chat_scroll_area = self.ui_widget.findChild(QScrollArea, 'chat')
+        if self.chat_scroll_area is None:
+            raise RuntimeError("No se encontró el QScrollArea 'chat' en el UI. Verifica el nombre del objeto en Qt Designer.")
+        self.chat_scroll_area.setWidgetResizable(True)
+        self.chat_container = QWidget()
+        self.chat_layout = QVBoxLayout(self.chat_container)
+        self.chat_layout.setSpacing(8)
+        self.chat_layout.addStretch(1)  # Para empujar mensajes hacia arriba
+        self.chat_container.setLayout(self.chat_layout)
+        self.chat_scroll_area.setWidget(self.chat_container)
+        # --- End chat scrollable area setup ---
 
         # Configurar la ventana para mantener el procesamiento en segundo plano
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop, False)
         
-        # Configurar la aplicación para mantener hilos activos al minimizar
         if platform.system() == "Windows":
-            # En Windows, configurar para mantener hilos activos
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         
-        # Ejecutar el cliente SocketIO en un hilo de alta prioridad
         self.client_thread = create_high_priority_thread(target=self.client.run_socketio_client)
         self.client_thread.start()
+
+        self.chat_message_signal.connect(self._add_chat_message)
 
     def listar_dispositivos(self):
         print("\nDispositivos disponibles:")
@@ -50,6 +66,37 @@ class MyMainWindow(CreateWindow):
     def setup_ui(self):
         if hasattr(self.ui_widget, 'btn_mute'):
             self.ui_widget.btn_mute.clicked.connect(self.start_and_stop_listening)
+        if hasattr(self.ui_widget, 'btn_send_msg'):
+            self.ui_widget.btn_send_msg.clicked.connect(self.send_chat_message)
+
+    def send_chat_message(self):
+        if hasattr(self.ui_widget, 'textEdit'):
+            text = self.ui_widget.textEdit.toPlainText().strip()
+            if text:
+                self.client.send_chat_message(text)
+                self.ui_widget.textEdit.clear()
+
+    def receive_chat_message(self, msg):
+        self.chat_message_signal.emit(msg)
+
+    def _add_chat_message(self, msg):
+        label = QLabel(msg)
+        label.setWordWrap(True)
+        label.setMinimumHeight(36)  # Altura mínima para simular burbuja de chat
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        label.setStyleSheet("""
+            background: #000000;
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-bottom: 4px;
+        """)
+        self.chat_layout.insertWidget(self.chat_layout.count() - 1, label)
+
+        # Scroll automático al final
+        if self.chat_scroll_area is not None:
+            self.chat_scroll_area.verticalScrollBar().setValue(
+                self.chat_scroll_area.verticalScrollBar().maximum()
+            )
 
     def set_monitor_volume(self, value):
         """Cambiar volumen de monitoreo (0-100)"""

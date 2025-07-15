@@ -22,6 +22,11 @@ def voice(sid, data):
 	# Ejemplo: reenviar el audio a todos los clientes conectados
 	sio.emit('voice', data)
 
+@sio.event
+def chat_message(sid, msg):
+    print(f"Mensaje de chat de {sid}: {msg}")
+    sio.emit('chat_message', msg)
+
 if __name__ == "__main__":
 	print("Socket.IO server listening on http://localhost:3000 ...")
 	eventlet.wsgi.server(eventlet.listen(('localhost', 3500)), app)
