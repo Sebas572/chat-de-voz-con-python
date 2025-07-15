@@ -1,11 +1,10 @@
 import sys
-from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QSizePolicy, QVBoxLayout, QScrollArea, QWidget
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QMessageBox, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, Signal
 import sounddevice as sd
 from audio.audio import MicrophoneListener
 from window.window import CreateWindow
 from client.client import Client
-from threading import Thread
 import multiprocessing
 import platform
 from utils.thread_utils import create_high_priority_thread, set_high_priority
@@ -23,10 +22,36 @@ class MyMainWindow(CreateWindow):
         self.microphone_listener = None
         self.setup_ui()
         self.listar_dispositivos()
-        parent = self if isinstance(self, QWidget) else None
-        self.name, ok = QInputDialog.getText(parent, "Nombre de usuario", "Por favor, escribe tu nombre:")
 
-        self.client = Client("http://127.0.0.1:3500", self.process_audio_data, self.receive_chat_message, self.name, self.receive_users_online, self.receive_remove_user)
+        self.name, ok = QInputDialog.getText(None, "Name", "Write your name:")
+        if not ok:
+            QMessageBox.information(
+                None,
+                "Sorry",
+                "I need your name"
+            )
+            sys.exit()
+            
+        self.code, ok = QInputDialog.getText(None, "Room", "Room code:")
+        if not ok:
+            QMessageBox.information(
+                None,
+                "Sorry",
+                "I need room code"
+            )
+            sys.exit()
+
+        self.client = Client(
+            url="http://127.0.0.1:3500/",
+            callback_play_sound=self.process_audio_data,
+            callback_chat_message=self.receive_chat_message,
+            callback_users_online=self.receive_users_online,
+            callback_remove_user=self.receive_remove_user,
+            name=self.name,
+            room_code=self.code,
+        )
+
+        self.ui_widget.label_room.setText(self.code)
 
         # --- Chat scrollable area setup ---
         self.chat_scroll_area = self.ui_widget.chat

@@ -1,0 +1,1 @@
+pyinstaller --noconfirm --onedir --windowed --add-data "src/ui;src/ui" ./src/main.py
