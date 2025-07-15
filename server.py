@@ -4,7 +4,7 @@ import socketio
 import eventlet
 import numpy as np
 
-sio = socketio.Server()
+sio = socketio.Server(logger=False, engineio_logger=False)
 app = socketio.WSGIApp(sio)
 
 users = {}
@@ -32,7 +32,6 @@ def voice(sid, data):
 
 @sio.event
 def chat_message(sid, msg):
-	print(f"Mensaje de chat de {sid}: {msg}")
 	code = user_to_room[sid]
 
 	sio.emit('chat_message', msg, room=code)
@@ -53,5 +52,18 @@ def new_user(sid, user):
 		sio.emit('new_user', name, room=code)
 
 if __name__ == "__main__":
-	print("Socket.IO server listening on http://localhost:3000 ...")
-	eventlet.wsgi.server(eventlet.listen(('localhost', 3500)), app)
+    print("Socket.IO server listening on http://localhost:3500 (sin logs de acceso)...")
+    
+    # Crear un logger silencioso
+    class QuietLogger:
+        def write(self, message):
+            pass
+    
+    # Configurar el servidor con logging silencioso
+    server = eventlet.listen(('localhost', 3500))
+    eventlet.wsgi.server(
+        server,
+        app,
+        log=QuietLogger(),  # Logger personalizado que no muestra nada
+        log_output=False     # Desactivar completamente los logs
+    )
