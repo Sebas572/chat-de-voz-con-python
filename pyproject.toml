@@ -1,0 +1,22 @@
+[project]
+name = "voicechatpy"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Sebastian",email = "sebastian.balebona@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "pyside6 (>=6.9.1,<7.0.0)",
+    "sounddevice (>=0.5.2,<0.6.0)",
+    "numpy (>=2.3.1,<3.0.0)",
+    "python-socketio (>=5.13.0,<6.0.0)",
+    "pywin32 (>=306,<307); sys_platform == 'win32'",
+    "psutil (>=5.9.0,<6.0.0); sys_platform == 'win32'",
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
