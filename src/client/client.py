@@ -1,4 +1,5 @@
 from time import sleep
+from PySide6.QtWidgets import QLabel, QSizePolicy
 import socketio
 import multiprocessing
 import numpy as np
@@ -9,7 +10,7 @@ import platform
 from utils.thread_utils import set_high_priority, create_high_priority_thread, create_high_priority_process
 
 # Función de nivel superior para el proceso hijo
-def run_client_process(url, send_queue, receive_queue, chat_send_queue, chat_receive_queue):
+def run_client_process(url, send_queue, receive_queue, chat_send_queue, chat_receive_queue, users_receive_queue, name):
     """Función ejecutada en el proceso hijo con alta prioridad"""
     # Configurar alta prioridad para el proceso hijo
     set_high_priority()
@@ -19,6 +20,9 @@ def run_client_process(url, send_queue, receive_queue, chat_send_queue, chat_rec
     # Definimos los callbacks internos
     def on_connect():
         print('Connection established with Socket.IO server!')
+
+        sleep(5)
+        sio.emit('new_user', name)
 
     def on_disconnect():
         print('Disconnected from Socket.IO server.')
@@ -33,16 +37,24 @@ def run_client_process(url, send_queue, receive_queue, chat_send_queue, chat_rec
     def on_chat_message(msg):
         chat_receive_queue.put(msg)
 
+    def on_new_user(name):
+        users_receive_queue.put({"name": name, "join": True})
+
+    def on_disconnect_user(name):
+        users_receive_queue.put({"name": name, "join": False})
+
     # Asignamos los callbacks
     sio.on('connect', on_connect)
     sio.on('disconnect', on_disconnect)
     sio.on('connect_error', on_connect_error)
     sio.on('voice', on_voice_data)
+    sio.on('new_user', on_new_user)
+    sio.on('disconnect_user', on_disconnect_user)
     sio.on('chat_message', on_chat_message)
     
     # Evento para controlar el hilo de envío
     stop_event = threading.Event()
-    
+
     def sender_thread():
         """Hilo que envía datos desde la cola con alta prioridad"""
         # Configurar alta prioridad para el hilo de envío
@@ -99,10 +111,12 @@ def run_client_process(url, send_queue, receive_queue, chat_send_queue, chat_rec
         sio.disconnect()
 
 class Client():
-    def __init__(self, url='http://localhost:3000', callback_play_sound=None, callback_chat_message=None):
+    def __init__(self, url='http://localhost:3000', callback_play_sound=None, callback_chat_message=None, name=None, callback_users_online=None, callback_remove_user=None):
         self.url = url
         self.callback_play_sound = callback_play_sound
         self.callback_chat_message = callback_chat_message
+        self.callback_users_online = callback_users_online
+        self.callback_remove_user = callback_remove_user
         self.connected = False
         self._process = None
         # Cola para enviar datos al proceso hijo
@@ -111,18 +125,28 @@ class Client():
         self.receive_queue = multiprocessing.Queue(maxsize=1000)
         self.chat_send_queue = multiprocessing.Queue(maxsize=100)
         self.chat_receive_queue = multiprocessing.Queue(maxsize=100)
+        self.users_receive_queue = multiprocessing.Queue(maxsize=100)
         # Evento para detener el hilo de recepción
         self.stop_event = threading.Event()
         # Hilo para recibir datos
         self.receive_thread = None
         self.chat_receive_thread = None
+        self.name = name
                 
     def run_socketio_client(self):
         """Inicia el cliente Socket.IO en un proceso separado con alta prioridad"""
         if self._process is None or not self._process.is_alive():
             self._process = multiprocessing.Process(
                 target=run_client_process,
-                args=(self.url, self.send_queue, self.receive_queue, self.chat_send_queue, self.chat_receive_queue),
+                args=(
+                    self.url,
+                    self.send_queue,
+                    self.receive_queue,
+                    self.chat_send_queue,
+                    self.chat_receive_queue,
+                    self.users_receive_queue,
+                    self.name,
+                ),
                 daemon=False  # Evitar que se termine al minimizar
             )
             self._process.start()
@@ -133,6 +157,8 @@ class Client():
             self.receive_thread.start()
             self.chat_receive_thread = create_high_priority_thread(target=self._chat_receive_loop)
             self.chat_receive_thread.start()
+            self.online_users_thread = create_high_priority_thread(target=self._receive_name_loop)
+            self.online_users_thread.start()
 
     def _receive_loop(self):
         """Bucle para recibir datos en el proceso principal con alta prioridad"""
@@ -150,6 +176,23 @@ class Client():
                 pass
             except Exception as e:
                 print(f"Error en receive_loop: {e}")
+
+    def _receive_name_loop(self):
+        set_high_priority()
+
+        while not self.stop_event.is_set():
+            try:
+                user = self.users_receive_queue.get(timeout=0.05)
+                if self.callback_users_online and self.callback_remove_user:
+                    if user["join"]:
+                        self.callback_users_online(user["name"])
+                    else:
+                        self.callback_remove_user(user["name"])
+            except Empty:
+                pass
+            except Exception as e:
+                print(f"Error en chat_receive_loop: {e}")
+
 
     def _chat_receive_loop(self):
         """Bucle para recibir mensajes de chat en el proceso principal con alta prioridad"""
@@ -198,6 +241,6 @@ class Client():
                     self.chat_send_queue.get_nowait()
                 except Empty:
                     pass
-            self.chat_send_queue.put(msg, block=False)
+            self.chat_send_queue.put(f"{self.name}: {msg}", block=False)
         except Exception as e:
             print(f"Error en send_chat_message: {e}")
