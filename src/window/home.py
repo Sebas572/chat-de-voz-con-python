@@ -21,7 +21,32 @@ class MyMainWindow(CreateWindow):
         self.listener_thread = None
         self.microphone_listener = None
         self.setup_ui()
-        self.listar_dispositivos()
+        dispositivos = self.listar_dispositivos()
+        dispositivos_entrada = [(index, name) for name, index in dispositivos["input"].items()]
+        print(dispositivos_entrada)
+
+        if not dispositivos_entrada:
+            QMessageBox.critical(None, "Error", "No se encontraron dispositivos de entrada de audio.")
+            sys.exit()
+
+        mic_names = [d[1] for d in dispositivos_entrada]
+        mic_choice, ok = QInputDialog.getItem(None, "Seleccionar micrófono", "Elige el micrófono de entrada:", mic_names, 0, False)
+        if not ok:
+            QMessageBox.information(None, "Cancelado", "Se requiere seleccionar un micrófono.")
+            sys.exit()
+        self.input_device = dispositivos_entrada[mic_names.index(mic_choice)][0]
+
+        # Selección de salida de audio
+        dispositivos_salida = [(index, name) for name, index in dispositivos["output"].items()]
+        if not dispositivos_salida:
+            QMessageBox.critical(None, "Error", "No se encontraron dispositivos de salida de audio.")
+            sys.exit()
+        out_names = [d[1] for d in dispositivos_salida]
+        out_choice, ok = QInputDialog.getItem(None, "Seleccionar salida de audio", "Elige el dispositivo de salida:", out_names, 0, False)
+        if not ok:
+            QMessageBox.information(None, "Cancelado", "Se requiere seleccionar una salida de audio.")
+            sys.exit()
+        self.output_device = dispositivos_salida[out_names.index(out_choice)][0]
 
         self.name, ok = QInputDialog.getText(None, "Name", "Write your name:")
         if not ok:
@@ -42,7 +67,7 @@ class MyMainWindow(CreateWindow):
             sys.exit()
 
         self.client = Client(
-            url="http://127.0.0.1:3500/",
+            url="http://127.0.0.1:3500",
             callback_play_sound=self.process_audio_data,
             callback_chat_message=self.receive_chat_message,
             callback_users_online=self.receive_users_online,
@@ -91,15 +116,27 @@ class MyMainWindow(CreateWindow):
     def listar_dispositivos(self):
         print("\nDispositivos disponibles:")
         dispositivos = sd.query_devices()
+        list_dispositivos = {"input": {}, "output": {}}
+
         for i, d in enumerate(dispositivos):
-            tipo = "Entrada/Salida"
+            tipo = "input/output"
             if d.get('max_input_channels', 0) > 0 and d.get('max_output_channels', 0) > 0:
-                tipo = "Entrada/Salida"
+                tipo = "input/output"
             elif d.get('max_input_channels', 0) > 0:
-                tipo = "Entrada"
+                tipo = "input"
             elif d.get('max_output_channels', 0) > 0:
-                tipo = "Salida"
-            print(f"{i}: {d.get('name', 'Unknown')} ({tipo})")
+                tipo = "output"
+            name = d.get('name', 'Unknown')
+            if name == 'Unknown':
+                pass
+
+            if tipo == "input/output":
+                list_dispositivos["input"][name] = i
+                list_dispositivos["output"][name] = i
+            else:
+                list_dispositivos[tipo][name] = i
+
+        return list_dispositivos
 
     def setup_ui(self):
         if hasattr(self.ui_widget, 'btn_mute'):
@@ -190,9 +227,9 @@ class MyMainWindow(CreateWindow):
         if hasattr(self.ui_widget, 'btn_mute'):
             self.ui_widget.btn_mute.setText("Silenciar")
 
-        # Seleccionar dispositivos (ajusta estos índices/nombres según tu sistema)
-        input_device = "Micrófono (WO Mic Device), MME"
-        output_device = "Auriculares (2- TWS), MME"
+        # Usar los dispositivos seleccionados por el usuario
+        input_device = self.input_device
+        output_device = self.output_device
         
         # Crear MicrophoneListener con callback de error
         self.microphone_listener = MicrophoneListener(

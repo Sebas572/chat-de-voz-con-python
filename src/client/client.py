@@ -123,12 +123,20 @@ def run_client_process(
     # Bucle de conexión/reconexión
     while not stop_event.is_set():
         try:
-            sio.connect(url)
+            print(f"Intentando conectar a {url} usando websocket...")
+            sio.connect(url, transports=['websocket'])
+            print("Conexión websocket exitosa!")
             sio.wait()
-        except (ConnectionRefusedError, Exception) as e:
-            print(f"Connection error: {e}")
+        except Exception as e:
+            print(f"Fallo la conexión websocket: {e}")
+            print("Intentando fallback a polling...")
+            try:
+                sio.connect(url, transports=['polling'])
+                print("Conexión polling exitosa!")
+                sio.wait()
+            except Exception as e2:
+                print(f"Fallo la conexión polling: {e2}")
         sleep(1)
-
     # Limpiar al terminar
     disconnect()
 
@@ -136,7 +144,7 @@ def run_client_process(
 class Client:
     def __init__(
         self,
-        url="http://localhost:3000",
+        url="http://localhost:3500",
         callback_play_sound=None,
         callback_chat_message=None,
         callback_users_online=None,
